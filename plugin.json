@@ -11,7 +11,7 @@
     "settings": "./DankSpotifySettings.qml",
     "trigger": "~",
     "requires_dms": ">=1.4.0",
-    "requires": ["playerctl", "ncspot", "wtype"],
+    "requires": ["busctl", "ncspot", "wtype"],
     "permissions": [
         "settings_read",
         "settings_write",

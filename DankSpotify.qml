@@ -12,7 +12,9 @@ QtObject {
     property string playerName: "ncspot"
     property string terminal: "foot"
     property string _currentTrack: ""
+    property string _currentArtist: ""
     property string _playerStatus: ""
+    property string _busName: ""
 
     signal itemsChanged
 
@@ -22,23 +24,69 @@ QtObject {
         trigger = pluginService.loadPluginData(pluginId, "trigger", "~");
         playerName = pluginService.loadPluginData(pluginId, "playerName", "ncspot");
         terminal = pluginService.loadPluginData(pluginId, "terminal", "foot");
-        refreshStatus();
+        discoverBus();
     }
 
     property Timer refreshTimer: Timer {
         interval: 3000
         repeat: true
         running: true
-        onTriggered: root.refreshStatus()
+        onTriggered: root.discoverBus()
     }
 
+    // Step 1: discover the MPRIS bus name for the configured player
+    function discoverBus() {
+        busDiscoveryProcess.running = true;
+    }
+
+    property Process busDiscoveryProcess: Process {
+        running: false
+        command: ["sh", "-c", "busctl --user list --no-pager 2>/dev/null | grep -oP 'org\\.mpris\\.MediaPlayer2\\." + root.playerName + "\\S*'"]
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var name = text.trim().split("\n")[0] || "";
+                if (name !== root._busName) {
+                    root._busName = name;
+                }
+                if (root._busName)
+                    root.refreshStatus();
+                else {
+                    root._playerStatus = "";
+                    root._currentTrack = "";
+                    root._currentArtist = "";
+                    root.itemsChanged();
+                }
+            }
+        }
+
+        onExited: exitCode => {
+            if (exitCode !== 0) {
+                root._busName = "";
+                root._playerStatus = "";
+                root._currentTrack = "";
+                root._currentArtist = "";
+            }
+        }
+    }
+
+    // Step 2: fetch metadata via dbus properties
     function refreshStatus() {
+        if (!_busName)
+            return;
+        statusProcess.command = [
+            "sh", "-c",
+            "status=$(busctl --user get-property '" + _busName + "' /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlaybackStatus 2>/dev/null | sed 's/^s \"//;s/\"$//');" +
+            "meta=$(busctl --user get-property '" + _busName + "' /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Metadata 2>/dev/null);" +
+            "title=$(echo \"$meta\" | grep -oP '\"xesam:title\"\\s+s\\s+\"\\K[^\"]+');" +
+            "artist=$(echo \"$meta\" | grep -oP '\"xesam:artist\"\\s+as\\s+\\d+\\s+\"\\K[^\"]+');" +
+            "printf '%s\\t%s\\t%s' \"$status\" \"$title\" \"$artist\""
+        ];
         statusProcess.running = true;
     }
 
     property Process statusProcess: Process {
         running: false
-        command: ["playerctl", "-p", root.playerName, "metadata", "--format", "{{status}}\t{{title}}\t{{artist}}\t{{album}}"]
 
         stdout: StdioCollector {
             onStreamFinished: {
@@ -46,14 +94,14 @@ QtObject {
                 if (line.length === 0) {
                     root._playerStatus = "";
                     root._currentTrack = "";
+                    root._currentArtist = "";
                     root.itemsChanged();
                     return;
                 }
                 var parts = line.split("\t");
                 root._playerStatus = parts[0] || "";
-                var title = parts[1] || "";
-                var artist = parts[2] || "";
-                root._currentTrack = title + (artist ? " - " + artist : "");
+                root._currentTrack = parts[1] || "";
+                root._currentArtist = parts[2] || "";
                 root.itemsChanged();
             }
         }
@@ -62,8 +110,16 @@ QtObject {
             if (exitCode !== 0) {
                 root._playerStatus = "";
                 root._currentTrack = "";
+                root._currentArtist = "";
             }
         }
+    }
+
+    function mprisCall(method) {
+        if (!_busName)
+            return;
+        Quickshell.execDetached(["busctl", "--user", "call", _busName,
+            "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", method]);
     }
 
     function getItems(query) {
@@ -76,19 +132,22 @@ QtObject {
                 icon: "material:search",
                 comment: "Open " + playerName + " and search",
                 action: "search:" + searchQuery,
-                categories: ["Spotify"]
+                categories: ["Spotify"],
+                _preScored: 1000
             });
         }
 
         // Current playback info
         if (_currentTrack) {
             var statusIcon = _playerStatus === "Playing" ? "material:pause_circle" : "material:play_circle";
+            var trackDisplay = _currentTrack + (_currentArtist ? " - " + _currentArtist : "");
             results.push({
-                name: _currentTrack,
+                name: trackDisplay,
                 icon: statusIcon,
                 comment: _playerStatus || "Unknown",
                 action: "toggle:",
-                categories: ["Spotify"]
+                categories: ["Spotify"],
+                _preScored: 1000
             });
         }
 
@@ -98,28 +157,32 @@ QtObject {
             icon: "material:play_pause",
             comment: "Toggle playback",
             action: "toggle:",
-            categories: ["Spotify"]
+            categories: ["Spotify"],
+            _preScored: 1000
         });
         results.push({
             name: "Next Track",
             icon: "material:skip_next",
             comment: "Skip to next",
             action: "next:",
-            categories: ["Spotify"]
+            categories: ["Spotify"],
+            _preScored: 1000
         });
         results.push({
             name: "Previous Track",
             icon: "material:skip_previous",
             comment: "Go to previous",
             action: "prev:",
-            categories: ["Spotify"]
+            categories: ["Spotify"],
+            _preScored: 1000
         });
         results.push({
             name: "Open " + playerName,
             icon: "material:open_in_new",
             comment: "Launch in terminal",
             action: "launch:",
-            categories: ["Spotify"]
+            categories: ["Spotify"],
+            _preScored: 1000
         });
 
         return results;
@@ -136,13 +199,13 @@ QtObject {
 
         switch (actionType) {
         case "toggle":
-            Quickshell.execDetached(["playerctl", "-p", playerName, "play-pause"]);
+            mprisCall("PlayPause");
             break;
         case "next":
-            Quickshell.execDetached(["playerctl", "-p", playerName, "next"]);
+            mprisCall("Next");
             break;
         case "prev":
-            Quickshell.execDetached(["playerctl", "-p", playerName, "previous"]);
+            mprisCall("Previous");
             break;
         case "launch":
             Quickshell.execDetached([terminal, playerName]);
@@ -155,7 +218,7 @@ QtObject {
         // Refresh status after a short delay
         Qt.callLater(function() {
             refreshTimer.restart();
-            refreshStatus();
+            discoverBus();
         });
     }
 
