@@ -2,16 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: write
 
 jobs:
-  validate:
-    name: Validate
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +24,21 @@ jobs:
       - name: Check VERSION exists
         run: test -f VERSION
 
+      - name: Run tests
+        run: bash test.sh
+
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Auto-tag release
         id: tag
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           VERSION="v$(cat VERSION)"
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
