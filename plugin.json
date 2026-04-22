@@ -2,7 +2,7 @@
     "id": "dankSpotify",
     "name": "Spotify",
     "description": "Control Spotify playback and search tracks via ncspot",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "author": "alcxyz",
     "icon": "music_note",
     "type": "launcher",
