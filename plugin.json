@@ -1,0 +1,20 @@
+{
+    "id": "dankSpotify",
+    "name": "Spotify",
+    "description": "Control Spotify playback and search tracks via ncspot",
+    "version": "0.1.0",
+    "author": "alcxyz",
+    "icon": "music_note",
+    "type": "launcher",
+    "capabilities": ["launcher"],
+    "component": "./DankSpotify.qml",
+    "settings": "./DankSpotifySettings.qml",
+    "trigger": "~",
+    "requires_dms": ">=1.4.0",
+    "requires": ["playerctl", "ncspot", "wtype"],
+    "permissions": [
+        "settings_read",
+        "settings_write",
+        "process"
+    ]
+}
