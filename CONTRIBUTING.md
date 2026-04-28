@@ -46,11 +46,11 @@ Use conventional-ish prefixes to keep history scannable:
 
 ## Releasing
 
-Releases are automated via GitHub Actions. The `VERSION` file is the single source of truth.
+Releases are automated via GitHub Actions. The `version` field in `plugin.json` is the single source of truth.
 
 To cut a release:
 
-1. Bump the `VERSION` file on `dev`
+1. Bump the `version` field in `plugin.json` on `dev`
 2. Merge `dev` into `main`
 3. CI automatically creates the git tag and a GitHub release
 
