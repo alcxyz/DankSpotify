@@ -39,14 +39,14 @@ Copy the plugin directory to `~/.config/DankMaterialShell/plugins/DankSpotify/`.
 
 Activate with `~` (default trigger) in the DMS launcher, then:
 
-- `~` - show current track and playback controls
-- `~artist name` - open ncspot and search for "artist name"
+- `~` — show current track and playback controls
+- `~artist name` — open ncspot and search for "artist name"
 
 ## Requirements
 
-- [playerctl](https://github.com/altdesktop/playerctl) - MPRIS media player control
-- [ncspot](https://github.com/hrkfdn/ncspot) - Terminal Spotify client
-- [wtype](https://github.com/atx/wtype) - Wayland keyboard input simulation
+- [playerctl](https://github.com/altdesktop/playerctl) — MPRIS media player control
+- [ncspot](https://github.com/hrkfdn/ncspot) — Terminal Spotify client
+- [wtype](https://github.com/atx/wtype) — Wayland keyboard input simulation
 
 ## License
 
