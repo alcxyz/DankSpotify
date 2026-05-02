@@ -25,7 +25,7 @@ inputs.dms-plugin-spotify = {
 ```
 
 ```nix
-programs.dank-material-shell.plugins.DankSpotify = {
+programs.dank-material-shell.plugins.dankSpotify = {
   enable = true;
   src = inputs.dms-plugin-spotify;
 };
