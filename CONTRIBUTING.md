@@ -46,13 +46,18 @@ Use conventional-ish prefixes to keep history scannable:
 
 ## Releasing
 
-Releases are automated via GitHub Actions. The `version` field in `plugin.json` is the single source of truth.
+Releases are automated via GitHub Actions. The `version` field in `plugin.json` is the source of truth for release tags.
+
+Normal development and contributor PRs target `dev` and do not require a version bump. The `main` branch is protected and is used for releases.
 
 To cut a release:
 
-1. Bump the `version` field in `plugin.json` on `dev`
-2. Merge `dev` into `main`
-3. CI automatically creates the git tag and a GitHub release
+1. Make sure `dev` contains the changes to release.
+2. Create a release branch from `dev`, for example `release/v0.2.3`.
+3. Bump the `version` field in `plugin.json` on the release branch unless the release is documentation-only.
+4. Open a pull request from the release branch to `main`.
+5. Merge after review and checks pass. CI creates the git tag and GitHub release from `plugin.json.version`.
+6. Sync `main` back into `dev` after the release so both branches agree on released metadata.
 
 ### Version numbering
 
