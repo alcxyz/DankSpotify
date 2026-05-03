@@ -38,7 +38,7 @@ jobs:
         id: tag
         run: |
           VERSION="v$(jq -r .version plugin.json)"
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+          if git tag -l "$VERSION" | grep -q . || git ls-remote --tags origin "$VERSION" | grep -q .; then
             echo "Tag $VERSION already exists, skipping."
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
