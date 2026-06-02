@@ -36,20 +36,45 @@ jobs:
 
       - name: Auto-tag release
         id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="v$(jq -r .version plugin.json)"
-          if git tag -l "$VERSION" | grep -q . || git ls-remote --tags origin "$VERSION" | grep -q .; then
+          TARGET_SHA="$(git rev-parse HEAD)"
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" >/dev/null 2>&1; then
             echo "Tag $VERSION already exists, skipping."
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Creating tag $VERSION"
-            git tag "$VERSION"
-            git push origin "$VERSION"
+            echo "Creating tag $VERSION at $TARGET_SHA"
+            gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${VERSION}" \
+              -f "sha=${TARGET_SHA}" >/dev/null
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" >/dev/null
+
       - name: Create GitHub Release
-        if: steps.tag.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "v$(jq -r .version plugin.json)" --generate-notes
+        run: |
+          VERSION="v$(jq -r .version plugin.json)"
+          TARGET_SHA="$(git rev-parse HEAD)"
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" \
+              --draft=false \
+              --prerelease=false \
+              --latest \
+              --target "$TARGET_SHA" \
+              --verify-tag
+          else
+            gh release create "$VERSION" \
+              --target "$TARGET_SHA" \
+              --latest \
+              --verify-tag \
+              --generate-notes
+          fi
