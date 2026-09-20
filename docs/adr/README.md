@@ -3,3 +3,4 @@
 | ADR | Title | Area |
 |---|---|---|
 | [ADR-001](ADR-001-busctl-over-playerctl.md) | Use busctl Instead of playerctl for MPRIS Control | media control |
+| [ADR-002](ADR-002-packaged-build-identity.md) | Packaged build identity | packaging |

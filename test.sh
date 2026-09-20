@@ -120,6 +120,10 @@ assert_eq "status field" "Playing" "$(echo "$COMBINED" | cut -f1)"
 assert_eq "title field" "Bohemian Rhapsody" "$(echo "$COMBINED" | cut -f2)"
 assert_eq "artist field" "Queen" "$(echo "$COMBINED" | cut -f3)"
 
+# ── packaged build identity ─────────────────────────────────────────
+
+python3 -m unittest discover -s tests -p 'test_*.py'
+
 # ── summary ──────────────────────────────────────────────────────────
 
 echo ""
