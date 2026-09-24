@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, dev]
   pull_request:
@@ -13,6 +14,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -23,13 +25,81 @@ jobs:
           python3 - <<'PY'
           import json
           import re
+          from pathlib import Path
+          from urllib.parse import unquote, urlsplit
 
           with open("plugin.json", encoding="utf-8") as f:
               plugin = json.load(f)
 
-          version = plugin.get("version", "")
-          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+          if not isinstance(plugin, dict):
+              raise SystemExit("plugin.json must contain an object")
+          for field in ("id", "name", "description", "author", "component", "version"):
+              if not isinstance(plugin.get(field), str) or not plugin[field].strip():
+                  raise SystemExit(f"plugin.json {field} must be a nonempty string")
+
+          version = plugin["version"]
+          if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
               raise SystemExit(f"plugin.json version must be X.Y.Z, got {version!r}")
+
+          root = Path.cwd().resolve()
+          for field in ("component", "settings"):
+              if field not in plugin:
+                  continue
+              value = plugin[field]
+              if not isinstance(value, str) or not value.strip():
+                  raise SystemExit(f"plugin.json {field} must be a nonempty string")
+              reference = urlsplit(value)
+              path = (root / unquote(reference.path)).resolve()
+              if reference.scheme or reference.netloc or not path.is_relative_to(root) or not path.is_file():
+                  raise SystemExit(f"plugin.json {field} does not reference a local file: {value!r}")
+          PY
+
+      - name: Validate CHANGELOG.md
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          with open("plugin.json", encoding="utf-8") as f:
+              version = json.load(f)["version"]
+
+          try:
+              text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          except FileNotFoundError:
+              raise SystemExit("CHANGELOG.md is required: keep an [Unreleased] section and one dated section per released version")
+
+          heading = re.compile(
+              r"^## \[(?:(Unreleased)|((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)))\](?: - (\d{4}-\d{2}-\d{2}))?$"
+          )
+          order = []
+          sections = {}
+          current = None
+          for line in text.splitlines():
+              if not line.startswith("## "):
+                  if current is not None:
+                      sections[current].append(line)
+                  continue
+              match = heading.match(line)
+              if not match:
+                  raise SystemExit(f"CHANGELOG.md heading must be '## [Unreleased]' or '## [X.Y.Z] - YYYY-MM-DD': {line!r}")
+              unreleased, released, date = match.groups()
+              if released and not date:
+                  raise SystemExit(f"CHANGELOG.md released section needs a date: {line!r}")
+              if unreleased and date:
+                  raise SystemExit("CHANGELOG.md [Unreleased] section must not carry a date")
+              current = unreleased or released
+              if current in sections:
+                  raise SystemExit(f"CHANGELOG.md has duplicate section [{current}]")
+              order.append(current)
+              sections[current] = []
+
+          if order[:1] != ["Unreleased"]:
+              raise SystemExit("CHANGELOG.md must start with an '## [Unreleased]' section")
+          if version not in sections:
+              raise SystemExit(f"CHANGELOG.md has no '## [{version}]' section for plugin.json version {version}")
+          if not any(line.strip() for line in sections[version]):
+              raise SystemExit(f"CHANGELOG.md section [{version}] is empty; describe the release before publishing it")
           PY
 
       - uses: actions/setup-go@v6
@@ -53,6 +123,10 @@ jobs:
     name: Release
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: plugin-release
+      cancel-in-progress: false
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -68,14 +142,20 @@ jobs:
           echo "version=v${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Auto-tag release
+        id: release_tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           TARGET_SHA="$(git rev-parse HEAD)"
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists, skipping."
+          if git show-ref --verify --quiet "refs/tags/${VERSION}"; then
+            EXISTING_SHA="$(git rev-parse "refs/tags/${VERSION}^{commit}")"
+            if [ "$EXISTING_SHA" != "$TARGET_SHA" ]; then
+              echo "Tag $VERSION already belongs to $EXISTING_SHA; no new version to release."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           else
             echo "Creating tag $VERSION at $TARGET_SHA"
             gh api \
@@ -86,8 +166,55 @@ jobs:
           fi
 
           gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" >/dev/null
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Render release notes
+        if: steps.release_tag.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          version = os.environ["VERSION"].removeprefix("v")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          heading = re.compile(r"^## \[([^\]]+)\](?: - \d{4}-\d{2}-\d{2})?$")
+          sections = {}
+          current = None
+          for line in text.splitlines():
+              match = heading.match(line) if line.startswith("## ") else None
+              if match:
+                  current = match.group(1)
+                  sections[current] = []
+              elif current is not None:
+                  sections[current].append(line)
+
+          body = "\n".join(sections.get(version, [])).strip("\n")
+          if not body.strip():
+              raise SystemExit(f"CHANGELOG.md has no content for [{version}]")
+
+          def parse(tag):
+              match = re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag)
+              return tuple(int(part) for part in match.groups()) if match else None
+
+          tags = subprocess.run(["git", "tag", "--list", "v*"], check=True, capture_output=True, text=True).stdout.split()
+          current_key = parse(f"v{version}")
+          previous = max((parse(tag) for tag in tags if parse(tag) and parse(tag) < current_key), default=None)
+          if previous:
+              link = f"https://github.com/{repository}/compare/v{'.'.join(map(str, previous))}...v{version}"
+          else:
+              link = f"https://github.com/{repository}/commits/v{version}"
+
+          Path("release-notes.md").write_text(f"{body}\n\n**Full changelog:** {link}\n", encoding="utf-8")
+          PY
 
       - name: Create GitHub Release
+        if: steps.release_tag.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -96,15 +223,26 @@ jobs:
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
-              --draft=false \
-              --prerelease=false \
-              --latest \
               --target "$TARGET_SHA" \
+              --notes-file release-notes.md \
               --verify-tag
           else
             gh release create "$VERSION" \
               --target "$TARGET_SHA" \
               --latest \
               --verify-tag \
-              --generate-notes
+              --notes-file release-notes.md
+          fi
+
+          RELEASE_ID="$(gh release view "$VERSION" --json databaseId --jq '.databaseId')"
+          jq -n \
+            --arg name "$VERSION" \
+            --arg target "$TARGET_SHA" \
+            '{name:$name, target_commitish:$target, draft:false, prerelease:false, make_latest:"true"}' |
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input - >/dev/null
+
+          LATEST_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          if [ "$LATEST_TAG" != "$VERSION" ]; then
+            echo "::error::Latest release is $LATEST_TAG, expected $VERSION."
+            exit 1
           fi
