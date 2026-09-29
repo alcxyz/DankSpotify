@@ -56,8 +56,8 @@ To cut a release:
 2. Create a release branch from `dev`, for example `release/v0.2.3`.
 3. Bump the `version` field in `plugin.json` on the release branch unless the release is documentation-only.
 4. Open a pull request from the release branch to `main`.
-5. Merge after review and checks pass. CI creates the git tag and GitHub release from `plugin.json.version`.
-6. Sync `main` back into `dev` after the release so both branches agree on released metadata.
+5. Merge with a merge commit, not a squash, after review and checks pass. CI creates the git tag and GitHub release from `plugin.json.version`.
+6. Merge `main` back into `dev` after the release so `dev` receives the released metadata; this merges cleanly because `main` keeps the release branch history.
 
 ### Version numbering
 
